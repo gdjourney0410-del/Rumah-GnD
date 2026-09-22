@@ -168,6 +168,21 @@ td .kind{font-size:12px;color:var(--muted);font-weight:500;margin-left:6px}
 .addrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .addrow input{flex:1 1 180px}
 
+.sumhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.dl{display:flex;gap:8px}
+.pies{display:grid;gap:22px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:760px){.pies{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.piehead{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.piehead .dot{display:inline-block}
+.piehead .num{margin-left:auto;font-weight:700}
+.pierow{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.pierow svg{flex:none}
+.pielegend{list-style:none;margin:0;padding:0;flex:1 1 180px;min-width:0;font-size:13px}
+.pielegend li{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:3px 0}
+.pielegend i{width:10px;height:10px;border-radius:2px}
+.pielegend .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pielegend .p{color:var(--muted);font-weight:600;font-size:12px}
+.pielegend .v{font-weight:600;text-align:right}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;font-weight:600;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;max-width:90vw}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
@@ -515,7 +530,8 @@ function renderSummary(){
   const A=memName('a'),B=memName('b');
   const toAset=asetMoved(tx);const tAset=+bud._aset||0;
   let h=`<div class="panel">
-    <div class="muted small" style="font-weight:600">Total pengeluaran ${esc(pLabel())}</div>
+    <div class="sumhead"><div class="muted small" style="font-weight:600">Total pengeluaran ${esc(pLabel())}</div>
+      <div class="dl"><button class="btn ghost sm" id="dlXlsx">Unduh Excel</button><button class="btn ghost sm" id="dlPdf">Unduh PDF</button></div></div>
     <div class="big num">${rp(tOut)}</div>
     <div class="stats">
       <div class="stat"><div class="k">Pemasukan</div><div class="v num">${rp(tIn)}</div></div>
@@ -528,7 +544,7 @@ function renderSummary(){
     h+=`<div class="strip" role="img" aria-label="Komposisi pengeluaran per akun beban">${rows.filter(r=>r[1].amt).map(([id,c])=>`<span style="width:${c.amt/tOut*100}%;background:${catColor(id)}" title="${esc(nm(id))} ${pctf(c.amt/tOut)}"></span>`).join('')}</div>
     <div class="legend">${rows.filter(r=>r[1].amt).slice(0,8).map(([id,c])=>`<span><i style="background:${catColor(id)}"></i>${esc(nm(id))} ${pctf(c.amt/tOut)}</span>`).join('')}</div>`;
   }
-  h+=`</div>
+  h+=`</div>${piePanel(buildReport())}
   <div class="grid2">
     <div class="panel">
       <h2>Pengeluaran per pencatat</h2>
@@ -551,6 +567,8 @@ function renderSummary(){
     </div>
   </div>`;
   v.innerHTML=h;
+  $('#dlXlsx').onclick=()=>{try{saveBlob('laporan-kas-rumah_'+fileStamp()+'.xlsx',buildXlsx());toast('File Excel diunduh.');}catch(e){console.error(e);toast('Gagal membuat file Excel.');}};
+  $('#dlPdf').onclick=()=>{try{saveBlob('laporan-kas-rumah_'+fileStamp()+'.pdf',buildPdf());toast('Laporan PDF diunduh.');}catch(e){console.error(e);toast('Gagal membuat laporan PDF.');}};
 }
 
 /* ---------- saldo ---------- */
@@ -695,6 +713,448 @@ function renderBudget(){
     $('#bAset').value=prev._aset?(+prev._aset).toLocaleString('id-ID'):'';
     sum();toast('Angka disalin. Tekan Simpan anggaran untuk menyimpan.');
   };
+}
+
+/* ---------- data laporan ---------- */
+function buildReport(){
+  const {s,e}=range();const tx=periodTx();const all=allTx();
+  const out=tx.filter(t=>t.type==='out'),inc=tx.filter(t=>t.type==='in');
+  const sum=l=>l.reduce((a,t)=>a+t.amount,0);
+  const tOut=sum(out),tIn=sum(inc);
+  const bud=(S.budget[P]||{}).cats||{};
+  const tBud=Object.entries(bud).reduce((a,[k,x])=>k==='_aset'?a:a+(+x||0),0);
+  const tAset=+bud._aset||0,toAset=asetMoved(tx);
+  const cm={};
+  out.forEach(t=>{const c=cm[t.cat]||(cm[t.cat]={id:t.cat,a:0,b:0});c[t.by==='b'?'b':'a']+=t.amount;});
+  Object.keys(bud).forEach(k=>{if(k!=='_aset'&&+bud[k]&&!cm[k])cm[k]={id:k,a:0,b:0};});
+  const nm=id=>{const c=byId(S.cfg.expense,id);return c?c.name:'(tanpa akun)';};
+  const cats=Object.values(cm).map(c=>({id:c.id,name:nm(c.id),color:catColor(c.id),a:c.a,b:c.b,amt:c.a+c.b,bud:+bud[c.id]||0}))
+    .sort((x,y)=>y.amt-x.amt||y.bud-x.bud);
+  const members=['a','b'].map(m=>{
+    const list=cats.filter(c=>c[m]>0).map(c=>({id:c.id,name:c.name,color:c.color,amt:c[m]})).sort((x,y)=>y.amt-x.amt);
+    const total=list.reduce((a,c)=>a+c.amt,0);list.forEach(c=>c.pct=total?c.amt/total:0);
+    return {id:m,name:memName(m),total,list};
+  });
+  const im={};
+  inc.forEach(t=>{const c=im[t.cat]||(im[t.cat]={a:0,b:0});c[t.by==='b'?'b':'a']+=t.amount;});
+  const income=Object.entries(im).map(([id,c])=>{const k=byId(S.cfg.income,id);return {name:k?k.name:'(tanpa kategori)',a:c.a,b:c.b,amt:c.a+c.b};}).sort((x,y)=>y.amt-x.amt);
+  const groups=['a','b',''].map(o=>({label:ownerName(o),aset:false,list:S.cfg.accounts.filter(a=>(a.owner||'')===o&&!isAset(a))}));
+  groups.push({label:'Aset',aset:true,list:S.cfg.accounts.filter(isAset)});
+  const saldo=groups.filter(g=>g.list.length).map(g=>({label:g.label,aset:g.aset,rows:g.list.slice().sort((x,y)=>kindOrder(x.kind)-kindOrder(y.kind)).map(a=>{
+    const r=accStats(a,s,e,all);
+    return Object.assign({name:a.name,kind:kindLabel(a.kind),owner:a.owner?memName(a.owner):''},r);
+  })}));
+  const txs=tx.slice().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:(a.ts||0)-(b.ts||0));
+  return {label:pLabel(),s,e,tOut,tIn,tBud,tAset,toAset,cats,members,income,saldo,txs};
+}
+
+/* ---------- pie di layar ---------- */
+function pieSVG(list,total,size){
+  const r=size/2;
+  if(!total)return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-hidden="true"><circle cx="${r}" cy="${r}" r="${r-1}" fill="var(--sunk)" stroke="var(--line)"/></svg>`;
+  if(list.length===1)return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-hidden="true"><circle cx="${r}" cy="${r}" r="${r}" fill="${list[0].color}"/></svg>`;
+  let a0=0;const paths=list.map(c=>{
+    const a1=a0+c.amt/total*Math.PI*2;
+    const x0=r+r*Math.sin(a0),y0=r-r*Math.cos(a0),x1=r+r*Math.sin(a1),y1=r-r*Math.cos(a1);
+    const large=a1-a0>Math.PI?1:0;a0=a1;
+    return `<path d="M${r} ${r}L${x0.toFixed(2)} ${y0.toFixed(2)}A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}Z" fill="${c.color}" stroke="var(--surface)" stroke-width="1.5"><title>${esc(c.name)} ${pctf(c.pct)}</title></path>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img">${paths}</svg>`;
+}
+function piePanel(R){
+  return `<div class="panel">
+    <h2>Komposisi pengeluaran per pencatat</h2>
+    <div class="pies">${R.members.map(m=>`<div class="piebox">
+      <div class="piehead"><span class="dot ${m.id}"></span><b>${esc(m.name)}</b><span class="num">${rp(m.total)}</span></div>
+      <div class="pierow">${pieSVG(m.list,m.total,150)}
+        ${m.list.length?`<ul class="pielegend">${m.list.map(c=>`<li><i style="background:${c.color}"></i><span class="n">${esc(c.name)}</span><span class="num p">${pctf(c.pct)}</span><span class="num v">${rp(c.amt)}</span></li>`).join('')}</ul>`:'<p class="muted small">Belum ada pengeluaran di periode ini.</p>'}
+      </div></div>`).join('')}</div>
+  </div>`;
+}
+
+/* ---------- unduhan ---------- */
+function saveBlob(name,blob){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},4000);
+}
+function fileStamp(){return P+'_'+today();}
+
+/* ---------- ZIP (untuk .xlsx) ---------- */
+const CRCT=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRCT[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function makeZip(files,type){
+  const enc=new TextEncoder();const parts=[],cd=[];let off=0;
+  files.forEach(f=>{
+    const name=enc.encode(f.name),data=enc.encode(f.data),crc=crc32(data);
+    const lh=new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);
+    lh.setUint16(10,0,true);lh.setUint16(12,0x21,true);lh.setUint32(14,crc,true);lh.setUint32(18,data.length,true);
+    lh.setUint32(22,data.length,true);lh.setUint16(26,name.length,true);lh.setUint16(28,0,true);
+    parts.push(new Uint8Array(lh.buffer),name,data);
+    const ch=new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);
+    ch.setUint16(10,0,true);ch.setUint16(12,0,true);ch.setUint16(14,0x21,true);ch.setUint32(16,crc,true);
+    ch.setUint32(20,data.length,true);ch.setUint32(24,data.length,true);ch.setUint16(28,name.length,true);
+    ch.setUint16(30,0,true);ch.setUint16(32,0,true);ch.setUint16(34,0,true);ch.setUint16(36,0,true);
+    ch.setUint32(38,0,true);ch.setUint32(42,off,true);
+    cd.push(new Uint8Array(ch.buffer),name);off+=30+name.length+data.length;
+  });
+  const cdSize=cd.reduce((a,p)=>a+p.length,0);
+  const end=new DataView(new ArrayBuffer(22));
+  end.setUint32(0,0x06054b50,true);end.setUint16(8,files.length,true);end.setUint16(10,files.length,true);
+  end.setUint32(12,cdSize,true);end.setUint32(16,off,true);
+  return new Blob([...parts,...cd,new Uint8Array(end.buffer)],{type});
+}
+
+/* ---------- Excel ---------- */
+const X=s=>String(s==null?'':s).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const COL=c=>{let s='';while(c>0){const m=(c-1)%26;s=String.fromCharCode(65+m)+s;c=Math.floor((c-1)/26);}return s;};
+const ST={def:0,bold:1,title:2,head:3,rp:4,pct:5,date:6,totL:7,totRp:8,totPct:9,note:10,headR:11,grp:12};
+function newSheet(name,widths){return {name,rows:{},widths:widths||[],merges:[],charts:[],freeze:false,filter:null};}
+function put(sh,r,c,v,s,f){(sh.rows[r]||(sh.rows[r]={}))[c]={v,s:s||0,f};}
+function excelDate(d){const [y,m,dd]=parts(d);return (Date.UTC(y,m-1,dd)-Date.UTC(1899,11,30))/86400000;}
+function sheetXml(sh,drawRid){
+  const rows=Object.keys(sh.rows).map(Number).sort((a,b)=>a-b).map(r=>{
+    const cells=Object.keys(sh.rows[r]).map(Number).sort((a,b)=>a-b).map(c=>{
+      const {v,s,f}=sh.rows[r][c];const ref=COL(c)+r;
+      if(f!=null){
+        if(typeof v==='number')return `<c r="${ref}" s="${s}"><f>${X(f)}</f><v>${v}</v></c>`;
+        return `<c r="${ref}" s="${s}" t="str"><f>${X(f)}</f><v>${X(v==null?'':v)}</v></c>`;
+      }
+      if(typeof v==='number')return `<c r="${ref}" s="${s}"><v>${v}</v></c>`;
+      if(v==null||v==='')return `<c r="${ref}" s="${s}"/>`;
+      return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${X(v)}</t></is></c>`;
+    }).join('');
+    return `<row r="${r}">${cells}</row>`;
+  }).join('');
+  const cols=sh.widths.length?`<cols>${sh.widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>`:'';
+  const views=sh.freeze?`<sheetViews><sheetView workbookViewId="0"><pane ySplit="${sh.freeze}" topLeftCell="A${sh.freeze+1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`:'<sheetViews><sheetView workbookViewId="0"/></sheetViews>';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>${views}<sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${rows}</sheetData>${sh.filter?`<autoFilter ref="${sh.filter}"/>`:''}<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>${drawRid?`<drawing r:id="${drawRid}"/>`:''}</worksheet>`;
+}
+const STYLES=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="3"><numFmt numFmtId="164" formatCode="&quot;Rp&quot;\\ #,##0;[Red]\\-&quot;Rp&quot;\\ #,##0"/><numFmt numFmtId="165" formatCode="0.0%"/><numFmt numFmtId="166" formatCode="d\\ mmm\\ yyyy"/></numFmts>
+<fonts count="4"><font><sz val="10"/><name val="Arial"/><family val="2"/></font><font><b/><sz val="10"/><name val="Arial"/><family val="2"/></font><font><b/><sz val="14"/><color rgb="FF1E5B4E"/><name val="Arial"/><family val="2"/></font><font><i/><sz val="9"/><color rgb="FF5A6D67"/><name val="Arial"/><family val="2"/></font></fonts>
+<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCE8E2"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF2F5F3"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FF9FB3AB"/></bottom><diagonal/></border><border><left/><right/><top style="thin"><color rgb="FF15302A"/></top><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="13">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+<xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left"/></xf>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="1" fillId="3" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="165" fontId="1" fillId="3" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right"/></xf>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+function chartXml(title,sheetName,catRange,valRange,list){
+  const sn="'"+sheetName.replace(/'/g,"''")+"'";
+  const hex=c=>c.replace('#','').toUpperCase();
+  const dpts=list.map((c,i)=>`<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${hex(c.color)}"/></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr></c:dPt>`).join('');
+  const strPts=list.map((c,i)=>`<c:pt idx="${i}"><c:v>${X(c.name)}</c:v></c:pt>`).join('');
+  const numPts=list.map((c,i)=>`<c:pt idx="${i}"><c:v>${c.amt}</c:v></c:pt>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:roundedCorners val="0"/><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1200" b="1"/></a:pPr><a:r><a:rPr lang="id-ID" sz="1200" b="1"/><a:t>${X(title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/><c:pieChart><c:varyColors val="1"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:v>${X(title)}</c:v></c:tx>${dpts}<c:dLbls><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="900" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="id-ID"/></a:p></c:txPr><c:dLblPos val="inEnd"/><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="1"/><c:showBubbleSize val="0"/><c:showLeaderLines val="0"/></c:dLbls><c:cat><c:strRef><c:f>${sn}!${catRange}</c:f><c:strCache><c:ptCount val="${list.length}"/>${strPts}</c:strCache></c:strRef></c:cat><c:val><c:numRef><c:f>${sn}!${valRange}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${list.length}"/>${numPts}</c:numCache></c:numRef></c:val></c:ser><c:firstSliceAng val="0"/></c:pieChart><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea><c:legend><c:legendPos val="r"/><c:overlay val="0"/><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="900"/></a:pPr><a:endParaRPr lang="id-ID"/></a:p></c:txPr></c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart><c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr></c:chartSpace>`;
+}
+function buildXlsx(){
+  const R=buildReport();const A=memName('a'),B=memName('b');
+  const sheets=[];
+
+  /* Ringkasan */
+  const s1=newSheet('Ringkasan',[40,17,17,17,26,17,17,14]);sheets.push(s1);
+  put(s1,1,1,'Laporan Keuangan Rumah Tangga',ST.title);
+  put(s1,2,1,'Periode: '+R.label,ST.bold);
+  put(s1,3,1,'Dibuat '+fmtDate(today())+' dari aplikasi Kas Rumah',ST.note);
+  const n=R.cats.length;const r0=16,rT=r0+Math.max(n,1);
+  put(s1,5,1,'Keterangan',ST.head);put(s1,5,2,'Nominal',ST.headR);
+  const stats=[
+    ['Total pengeluaran',R.tOut,`D${rT}`],
+    ['Total pemasukan',R.tIn,null],
+    ['Selisih pemasukan dan pengeluaran',R.tIn-R.tOut,'B7-B6'],
+    ['Anggaran belanja',R.tBud,`F${rT}`],
+    ['Sisa anggaran belanja',R.tBud-R.tOut,'B9-B6'],
+    ['Dipindah ke aset (tabungan dan investasi)',R.toAset,null],
+    ['Target pindah ke aset',R.tAset,null]
+  ];
+  stats.forEach(([l,v,f],i)=>{put(s1,6+i,1,l);put(s1,6+i,2,v,ST.rp,f);});
+  put(s1,14,1,'Rincian per akun beban',ST.bold);
+  ['Akun beban',A,B,'Total','% dari total','Anggaran','Sisa anggaran','Terpakai %'].forEach((h,i)=>put(s1,15,i+1,h,i?ST.headR:ST.head));
+  if(!n){put(s1,r0,1,'Belum ada pengeluaran di periode ini',ST.note);}
+  R.cats.forEach((c,i)=>{const r=r0+i;
+    put(s1,r,1,c.name);put(s1,r,2,c.a,ST.rp);put(s1,r,3,c.b,ST.rp);
+    put(s1,r,4,c.amt,ST.rp,`B${r}+C${r}`);
+    put(s1,r,5,R.tOut?c.amt/R.tOut:0,ST.pct,`IF($D$${rT}>0,D${r}/$D$${rT},0)`);
+    put(s1,r,6,c.bud||'',ST.rp);
+    put(s1,r,7,c.bud?c.bud-c.amt:'',ST.rp,`IF(F${r}>0,F${r}-D${r},"")`);
+    put(s1,r,8,c.bud?c.amt/c.bud:'',ST.pct,`IF(F${r}>0,D${r}/F${r},"")`);
+  });
+  const lastC=r0+Math.max(n,1)-1;
+  put(s1,rT,1,'Total',ST.totL);
+  [2,3,4,6].forEach(c=>{const L=COL(c);const val=c===2?R.members[0].total:c===3?R.members[1].total:c===4?R.tOut:R.tBud;put(s1,rT,c,val,ST.totRp,`SUM(${L}${r0}:${L}${lastC})`);});
+  put(s1,rT,5,R.tOut?1:0,ST.totPct,`SUM(E${r0}:E${lastC})`);
+  put(s1,rT,7,R.tBud?R.tBud-R.tOut:'',ST.totRp,`IF(F${rT}>0,F${rT}-D${rT},"")`);
+  put(s1,rT,8,R.tBud?R.tOut/R.tBud:'',ST.totPct,`IF(F${rT}>0,D${rT}/F${rT},"")`);
+  // per pencatat
+  const rm=rT+3;
+  put(s1,rm-1,1,'Komposisi pengeluaran per pencatat',ST.bold);
+  const chartSpecs=[];let maxEnd=rm+2;
+  R.members.forEach((m,mi)=>{
+    const c0=mi?5:1;
+    put(s1,rm,c0,m.name,ST.grp);put(s1,rm,c0+1,'',ST.grp);put(s1,rm,c0+2,'',ST.grp);
+    put(s1,rm+1,c0,'Akun beban',ST.head);put(s1,rm+1,c0+1,'Nominal',ST.headR);put(s1,rm+1,c0+2,'% ',ST.headR);
+    const first=rm+2,cnt=Math.max(m.list.length,1),tot=first+cnt;
+    const L1=COL(c0+1);
+    if(!m.list.length)put(s1,first,c0,'Belum ada pengeluaran',ST.note);
+    m.list.forEach((c,i)=>{const r=first+i;put(s1,r,c0,c.name);put(s1,r,c0+1,c.amt,ST.rp);put(s1,r,c0+2,c.pct,ST.pct,`IF($${L1}$${tot}>0,${L1}${r}/$${L1}$${tot},0)`);});
+    put(s1,tot,c0,'Total '+m.name,ST.totL);
+    put(s1,tot,c0+1,m.total,ST.totRp,`SUM(${L1}${first}:${L1}${tot-1})`);
+    put(s1,tot,c0+2,m.total?1:0,ST.totPct,`SUM(${COL(c0+2)}${first}:${COL(c0+2)}${tot-1})`);
+    maxEnd=Math.max(maxEnd,tot);
+    if(m.list.length)chartSpecs.push({m,c0,first,last:first+m.list.length-1});
+  });
+  const chartRow=maxEnd+2;
+  chartSpecs.forEach(sp=>{
+    sp.from={col:sp.c0-1,row:chartRow-1};sp.to={col:sp.c0-1+(sp.c0===1?3:4),row:chartRow-1+20};
+    sp.xml=chartXml('Pengeluaran '+sp.m.name,'Ringkasan',`$${COL(sp.c0)}$${sp.first}:$${COL(sp.c0)}$${sp.last}`,`$${COL(sp.c0+1)}$${sp.first}:$${COL(sp.c0+1)}$${sp.last}`,sp.m.list);
+  });
+  s1.charts=chartSpecs;
+
+  /* Saldo akun */
+  const s2=newSheet('Saldo Akun',[14,20,11,17,17,17,17,17,17,26]);sheets.push(s2);
+  put(s2,1,1,'Saldo Akun Kas dan Aset',ST.title);put(s2,2,1,'Periode: '+R.label,ST.bold);
+  const hdr=['Kelompok','Akun','Jenis','Saldo awal','Pemasukan','Pengeluaran','Transfer masuk','Transfer keluar','Saldo akhir','Keterangan'];
+  hdr.forEach((h,i)=>put(s2,4,i+1,h,i>=3&&i<=8?ST.headR:ST.head));
+  let r=5;const subKas=[],subAll=[];const firstData=5;
+  R.saldo.forEach(g=>{
+    const start=r;
+    g.rows.forEach(a=>{
+      put(s2,r,1,g.label);put(s2,r,2,a.name);put(s2,r,3,g.aset?'Aset':a.kind);
+      const vals=a.inactive?[0,0,0,0,0]:[a.o,a.i,a.x,a.ti,a.to];
+      vals.forEach((v,i)=>put(s2,r,4+i,v,ST.rp));
+      put(s2,r,9,a.inactive?0:a.c,ST.rp,`D${r}+E${r}-F${r}+G${r}-H${r}`);
+      put(s2,r,10,a.inactive?'Belum aktif di periode ini':(a.od>R.s?'Saldo awal dicatat '+fmtDate(a.od):''),ST.note);
+      r++;
+    });
+    put(s2,r,1,'Subtotal '+g.label,ST.totL);put(s2,r,2,'',ST.totL);put(s2,r,3,'',ST.totL);
+    for(let c=4;c<=9;c++){const L=COL(c);const v=g.rows.reduce((a,x)=>a+(x.inactive?0:({4:x.o,5:x.i,6:x.x,7:x.ti,8:x.to,9:x.c})[c]),0);put(s2,r,c,v,ST.totRp,`SUM(${L}${start}:${L}${r-1})`);}
+    (g.aset?[]:subKas).push(r);subAll.push(r);r++;
+  });
+  const lastData=r-1;
+  const totRow=(label,subs)=>{put(s2,r,1,label,ST.totL);put(s2,r,2,'',ST.totL);put(s2,r,3,'',ST.totL);
+    for(let c=4;c<=9;c++){const L=COL(c);const v=subs.reduce((a,sr)=>a+(s2.rows[sr][c].v||0),0);put(s2,r,c,v,ST.totRp,subs.length?subs.map(sr=>L+sr).join('+'):'0');}r++;};
+  r++;totRow('Total kas (tanpa aset)',subKas);totRow('Total kas dan aset',subAll);
+  r+=2;put(s2,r,1,'Total per jenis akun',ST.bold);r++;
+  ['Jenis','','','Saldo awal','Pemasukan','Pengeluaran','Transfer masuk','Transfer keluar','Saldo akhir'].forEach((h,i)=>put(s2,r,i+1,h,i>=3?ST.headR:ST.head));r++;
+  const kStart=r;
+  KINDS.forEach(([k,l])=>{
+    put(s2,r,1,l);
+    for(let c=4;c<=9;c++){const L=COL(c);let v=0;R.saldo.forEach(g=>g.rows.forEach(x=>{if(!x.inactive&&(g.aset?'Aset':x.kind)===l)v+=({4:x.o,5:x.i,6:x.x,7:x.ti,8:x.to,9:x.c})[c];}));
+      put(s2,r,c,v,ST.rp,`SUMIF($C$${firstData}:$C$${lastData},"${l}",${L}$${firstData}:${L}$${lastData})`);}
+    r++;
+  });
+  put(s2,r,1,'Total',ST.totL);put(s2,r,2,'',ST.totL);put(s2,r,3,'',ST.totL);
+  for(let c=4;c<=9;c++){const L=COL(c);let v=0;for(let q=kStart;q<r;q++)v+=s2.rows[q][c].v;put(s2,r,c,v,ST.totRp,`SUM(${L}${kStart}:${L}${r-1})`);}
+  r+=2;put(s2,r,1,'Saldo aset mengikuti uang yang dipindahkan ke akun aset. Kenaikan atau penurunan nilai investasi belum dihitung.',ST.note);
+
+  /* Pemasukan */
+  const s3=newSheet('Pemasukan',[28,17,17,17,12]);sheets.push(s3);
+  put(s3,1,1,'Pemasukan per Kategori',ST.title);put(s3,2,1,'Periode: '+R.label,ST.bold);
+  ['Kategori',A,B,'Total','%'].forEach((h,i)=>put(s3,4,i+1,h,i?ST.headR:ST.head));
+  const ni=Math.max(R.income.length,1),it=5+ni;
+  if(!R.income.length)put(s3,5,1,'Belum ada pemasukan di periode ini',ST.note);
+  R.income.forEach((c,i)=>{const q=5+i;put(s3,q,1,c.name);put(s3,q,2,c.a,ST.rp);put(s3,q,3,c.b,ST.rp);put(s3,q,4,c.amt,ST.rp,`B${q}+C${q}`);put(s3,q,5,R.tIn?c.amt/R.tIn:0,ST.pct,`IF($D$${it}>0,D${q}/$D$${it},0)`);});
+  put(s3,it,1,'Total',ST.totL);
+  [2,3,4].forEach(c=>{const L=COL(c);const v=R.income.reduce((a,x)=>a+(c===2?x.a:c===3?x.b:x.amt),0);put(s3,it,c,v,ST.totRp,`SUM(${L}5:${L}${it-1})`);});
+  put(s3,it,5,R.tIn?1:0,ST.totPct,`SUM(E5:E${it-1})`);
+
+  /* Transaksi */
+  const s4=newSheet('Transaksi',[14,13,16,24,24,24,34,12]);sheets.push(s4);
+  ['Tanggal','Jenis','Nominal','Akun kas','Akun tujuan','Akun beban / kategori','Catatan','Dicatat oleh'].forEach((h,i)=>put(s4,1,i+1,h,i===2?ST.headR:ST.head));
+  s4.freeze=1;
+  R.txs.forEach((t,i)=>{const q=2+i;
+    put(s4,q,1,excelDate(t.date),ST.date);put(s4,q,2,t.type==='out'?'Pengeluaran':t.type==='in'?'Pemasukan':'Transfer');
+    put(s4,q,3,t.amount,ST.rp);put(s4,q,4,accName(t.acc));put(s4,q,5,t.type==='tf'?accName(t.to):'');
+    put(s4,q,6,t.type==='tf'?'':catName(t));put(s4,q,7,t.note||'');put(s4,q,8,memName(t.by));});
+  s4.filter=`A1:H${Math.max(1,R.txs.length+1)}`;
+
+  /* rakit */
+  const files=[];
+  const hasCharts=s1.charts.length>0;
+  const ct=[`<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`,`<Default Extension="xml" ContentType="application/xml"/>`,
+    `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`,
+    `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>`,
+    `<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>`];
+  sheets.forEach((sh,i)=>ct.push(`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`));
+  if(hasCharts){
+    ct.push(`<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`);
+    s1.charts.forEach((c,i)=>ct.push(`<Override PartName="/xl/charts/chart${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`));
+  }
+  files.push({name:'[Content_Types].xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">${ct.join('')}</Types>`});
+  files.push({name:'_rels/.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`});
+  const now=new Date().toISOString().replace(/\.\d+Z$/,'Z');
+  files.push({name:'docProps/core.xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Laporan Kas Rumah ${X(R.label)}</dc:title><dc:creator>Kas Rumah</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created></cp:coreProperties>`});
+  files.push({name:'xl/workbook.xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets>${sheets.map((sh,i)=>`<sheet name="${X(sh.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets>${s4.filter?`<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="3" hidden="1">'Transaksi'!$A$1:$H$${Math.max(1,R.txs.length+1)}</definedName></definedNames>`:''}<calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`});
+  files.push({name:'xl/_rels/workbook.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((sh,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`});
+  files.push({name:'xl/styles.xml',data:STYLES});
+  sheets.forEach((sh,i)=>files.push({name:`xl/worksheets/sheet${i+1}.xml`,data:sheetXml(sh,i===0&&hasCharts?'rId1':null)}));
+  if(hasCharts){
+    files.push({name:'xl/worksheets/_rels/sheet1.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>`});
+    const anchors=s1.charts.map((c,i)=>`<xdr:twoCellAnchor editAs="oneCell"><xdr:from><xdr:col>${c.from.col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${c.from.row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>${c.to.col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${c.to.row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="${i+2}" name="Grafik ${i+1}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId${i+1}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>`).join('');
+    files.push({name:'xl/drawings/drawing1.xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${anchors}</xdr:wsDr>`});
+    files.push({name:'xl/drawings/_rels/drawing1.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${s1.charts.map((c,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${i+1}.xml"/>`).join('')}</Relationships>`});
+    s1.charts.forEach((c,i)=>files.push({name:`xl/charts/chart${i+1}.xml`,data:c.xml}));
+  }
+  return makeZip(files,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+/* ---------- PDF ---------- */
+const HW=[278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+const HBW=[278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
+const pdfStr=s=>String(s==null?'':s).replace(/[\u2212\u2013\u2014]/g,'-').replace(/[\u2018\u2019]/g,"'").replace(/[\u201C\u201D]/g,'"').replace(/\u00A0/g,' ').replace(/[^\x20-\x7E\xA1-\xFF]/g,'?');
+function tw(s,size,bold){const W=bold?HBW:HW;let w=0;for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);w+=(c>=32&&c<=126)?W[c-32]:556;}return w*size/1000;}
+function fitStr(s,size,bold,max){s=pdfStr(s);if(tw(s,size,bold)<=max)return s;while(s.length>1&&tw(s+'...',size,bold)>max)s=s.slice(0,-1);return s+'...';}
+function rgb(hex){hex=hex.replace('#','');return [0,2,4].map(i=>(parseInt(hex.substr(i,2),16)/255).toFixed(3)).join(' ');}
+function buildPdf(){
+  const R=buildReport();
+  const PW=595.28,PH=841.89,M=40,CW=PW-2*M,BOTTOM=PH-50;
+  const INK='#15302A',MUT='#5A6D67',LINE='#C9D5D0',HEAD='#DCE8E2',SOFT='#F2F5F3',BRAND='#1E5B4E',RED='#B3261E';
+  const pages=[];let ops,y;
+  const newPage=()=>{ops=[];pages.push(ops);y=M;};
+  const T=(x,yy,s,size,bold,color,align)=>{s=pdfStr(s);const w=tw(s,size,bold);if(align==='right')x-=w;else if(align==='center')x-=w/2;
+    ops.push(`BT /${bold?'F2':'F1'} ${size} Tf ${rgb(color||INK)} rg ${x.toFixed(2)} ${(PH-yy).toFixed(2)} Td (${s.replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)')}) Tj ET`);};
+  const RECT=(x,yy,w,h,color)=>ops.push(`${rgb(color)} rg ${x.toFixed(2)} ${(PH-yy-h).toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f`);
+  const LN=(x1,y1,x2,y2,color,w)=>ops.push(`${rgb(color)} RG ${w||0.6} w ${x1.toFixed(2)} ${(PH-y1).toFixed(2)} m ${x2.toFixed(2)} ${(PH-y2).toFixed(2)} l S`);
+  const ensure=h=>{if(y+h>BOTTOM)newPage();};
+  const pie=(cx,cy,r,list,total)=>{
+    const CX=cx,CY=PH-cy;
+    if(!total){ops.push(`${rgb(SOFT)} rg ${rgb(LINE)} RG 0.8 w ${circ(CX,CY,r)} B`);return;}
+    if(list.length===1){ops.push(`${rgb(list[0].color)} rg ${circ(CX,CY,r)} f`);return;}
+    let th=0;
+    list.forEach(c=>{
+      const th1=th+c.amt/total*Math.PI*2;let path=`${CX.toFixed(2)} ${CY.toFixed(2)} m `;
+      let p0=Math.PI/2-th;const pEnd=Math.PI/2-th1;
+      path+=`${(CX+r*Math.cos(p0)).toFixed(2)} ${(CY+r*Math.sin(p0)).toFixed(2)} l `;
+      while(p0-pEnd>1e-6){const p1=Math.max(pEnd,p0-Math.PI/2);const d=p1-p0,k=4/3*Math.tan(d/4);
+        const x0=Math.cos(p0),y0=Math.sin(p0),x3=Math.cos(p1),y3=Math.sin(p1);
+        const x1=x0-k*y0,y1=y0+k*x0,x2=x3+k*y3,y2=y3-k*x3;
+        path+=`${(CX+r*x1).toFixed(2)} ${(CY+r*y1).toFixed(2)} ${(CX+r*x2).toFixed(2)} ${(CY+r*y2).toFixed(2)} ${(CX+r*x3).toFixed(2)} ${(CY+r*y3).toFixed(2)} c `;p0=p1;}
+      ops.push(`${rgb(c.color)} rg 1 1 1 RG 1 w ${path}h B`);th=th1;
+    });
+  };
+  const circ=(CX,CY,r)=>{const k=0.5523*r;return `${(CX+r).toFixed(2)} ${CY.toFixed(2)} m ${(CX+r).toFixed(2)} ${(CY+k).toFixed(2)} ${(CX+k).toFixed(2)} ${(CY+r).toFixed(2)} ${CX.toFixed(2)} ${(CY+r).toFixed(2)} c ${(CX-k).toFixed(2)} ${(CY+r).toFixed(2)} ${(CX-r).toFixed(2)} ${(CY+k).toFixed(2)} ${(CX-r).toFixed(2)} ${CY.toFixed(2)} c ${(CX-r).toFixed(2)} ${(CY-k).toFixed(2)} ${(CX-k).toFixed(2)} ${(CY-r).toFixed(2)} ${CX.toFixed(2)} ${(CY-r).toFixed(2)} c ${(CX+k).toFixed(2)} ${(CY-r).toFixed(2)} ${(CX+r).toFixed(2)} ${(CY-k).toFixed(2)} ${(CX+r).toFixed(2)} ${CY.toFixed(2)} c`;};
+  const section=t=>{ensure(80);y+=10;T(M,y+11,t,12,true,BRAND);y+=20;};
+  const table=(cols,rows,fs)=>{
+    fs=fs||8.5;const rh=fs+8;
+    const head=()=>{RECT(M,y,CW,rh,HEAD);let x=M;cols.forEach(c=>{const tx=c.align==='right'?x+c.w-5:x+5;T(tx,y+rh-5.5,fitStr(c.t,fs,true,c.w-8),fs,true,INK,c.align);x+=c.w;});y+=rh;};
+    ensure(rh*2);head();
+    rows.forEach(row=>{
+      if(y+rh>BOTTOM){newPage();head();}
+      if(row.fill)RECT(M,y,CW,rh,row.fill);
+      let x=M;cols.forEach((c,i)=>{const v=row.cells[i];if(v!=null&&v!==''){const tx=c.align==='right'?x+c.w-5:x+5;
+        T(tx,y+rh-5.5,fitStr(v,fs,!!row.bold,c.w-8),fs,!!row.bold,(row.colors&&row.colors[i])||(row.muted?MUT:INK),c.align);}x+=c.w;});
+      y+=rh;LN(M,y,M+CW,y,row.bold?INK:LINE,row.bold?0.8:0.4);
+    });
+  };
+  const pct=x=>pctf(x);
+  newPage();
+  /* kepala */
+  RECT(M,y,CW,4,BRAND);y+=22;
+  T(M,y,'Laporan Keuangan Rumah Tangga',18,true,INK);y+=18;
+  T(M,y,'Periode '+R.label,11,true,BRAND);
+  T(M+CW,y,'Dibuat '+fmtDate(today()),9,false,MUT,'right');y+=16;
+  /* angka utama */
+  const boxes=[['Total pengeluaran',R.tOut],['Total pemasukan',R.tIn],['Selisih',R.tIn-R.tOut],['Dipindah ke aset',R.toAset],
+    ['Anggaran belanja',R.tBud],['Sisa anggaran',R.tBud?R.tBud-R.tOut:null],['Target ke aset',R.tAset||null],['Pengeluaran '+memName('a')+' / '+memName('b'),null]];
+  const bw=(CW-3*8)/4,bh=42;
+  boxes.forEach((b,i)=>{const bx=M+(i%4)*(bw+8),by=y+Math.floor(i/4)*(bh+8);RECT(bx,by,bw,bh,SOFT);
+    T(bx+8,by+14,fitStr(b[0],8,false,bw-16),8,false,MUT);
+    let val;if(i===7)val=pct(R.tOut?R.members[0].total/R.tOut:0)+' / '+pct(R.tOut?R.members[1].total/R.tOut:0);else val=b[1]==null?'-':rp(b[1]);
+    T(bx+8,by+32,fitStr(val,12,true,bw-16),12,true,(typeof b[1]==='number'&&b[1]<0)?RED:INK);});
+  y+=2*bh+8+6;
+  /* pie per pencatat */
+  section('Komposisi pengeluaran per pencatat');
+  const colW=(CW-20)/2,rad=62;
+  const blockH=m=>36+rad*2+14+Math.max(1,m.list.length)*12;
+  ensure(Math.max(...R.members.map(blockH)));
+  const top=y;let bottom=y;
+  R.members.forEach((m,mi)=>{
+    const x0=M+mi*(colW+20);let yy=top;
+    RECT(x0,yy,colW,24,SOFT);
+    RECT(x0+8,yy+8,8,8,m.id==='a'?'#B4466A':'#3A5A9A');
+    T(x0+22,yy+16,m.name,10,true,INK);T(x0+colW-8,yy+16,rp(m.total),10,true,INK,'right');yy+=36;
+    pie(x0+colW/2,yy+rad,rad,m.list,m.total);yy+=rad*2+14;
+    if(!m.list.length){T(x0,yy+8,'Belum ada pengeluaran di periode ini.',8.5,false,MUT);yy+=12;}
+    m.list.forEach(c=>{RECT(x0,yy+1,7,7,c.color);T(x0+12,yy+8,fitStr(c.name,8,false,colW-130),8,false,INK);
+      T(x0+colW-72,yy+8,pct(c.pct),8,false,MUT,'right');T(x0+colW,yy+8,rp(c.amt),8,true,INK,'right');yy+=12;});
+    bottom=Math.max(bottom,yy);
+  });
+  y=bottom+6;
+  /* rincian beban */
+  section('Rincian pengeluaran per akun beban');
+  const A=memName('a'),B=memName('b');
+  const cw=[128,66,66,70,40,70,75];
+  const cols=[{t:'Akun beban',w:cw[0]},{t:A,w:cw[1],align:'right'},{t:B,w:cw[2],align:'right'},{t:'Total',w:cw[3],align:'right'},{t:'%',w:cw[4],align:'right'},{t:'Anggaran',w:cw[5],align:'right'},{t:'Sisa',w:cw[6],align:'right'}];
+  const rows=R.cats.map(c=>({cells:[c.name,rp(c.a),rp(c.b),rp(c.amt),pct(R.tOut?c.amt/R.tOut:0),c.bud?rp(c.bud):'-',c.bud?rp(c.bud-c.amt):'-'],colors:[null,null,null,null,null,null,c.bud&&c.amt>c.bud?RED:null]}));
+  if(!rows.length)rows.push({cells:['Belum ada pengeluaran di periode ini'],muted:true});
+  rows.push({bold:true,fill:SOFT,cells:['Total',rp(R.members[0].total),rp(R.members[1].total),rp(R.tOut),R.tOut?'100%':'0%',R.tBud?rp(R.tBud):'-',R.tBud?rp(R.tBud-R.tOut):'-'],colors:[null,null,null,null,null,null,R.tBud&&R.tOut>R.tBud?RED:null]});
+  table(cols,rows);
+  ensure(20);y+=14;
+  T(M,y,'Tabungan dan investasi: dipindah ke aset '+rp(R.toAset)+(R.tAset?' dari target '+rp(R.tAset)+' ('+pct(R.toAset/R.tAset)+').':'.'),8.5,false,MUT);y+=6;
+  /* pemasukan */
+  section('Pemasukan per kategori');
+  const icol=[{t:'Kategori',w:195},{t:A,w:85,align:'right'},{t:B,w:85,align:'right'},{t:'Total',w:95,align:'right'},{t:'%',w:CW-460,align:'right'}];
+  const irows=R.income.map(c=>({cells:[c.name,rp(c.a),rp(c.b),rp(c.amt),pct(R.tIn?c.amt/R.tIn:0)]}));
+  if(!irows.length)irows.push({cells:['Belum ada pemasukan di periode ini'],muted:true});
+  irows.push({bold:true,fill:SOFT,cells:['Total',rp(R.income.reduce((a,c)=>a+c.a,0)),rp(R.income.reduce((a,c)=>a+c.b,0)),rp(R.tIn),R.tIn?'100%':'0%']});
+  table(icol,irows);
+  /* saldo */
+  section('Saldo akun kas dan aset');
+  const scol=[{t:'Akun',w:103},{t:'Saldo awal',w:69,align:'right'},{t:'Pemasukan',w:68,align:'right'},{t:'Pengeluaran',w:68,align:'right'},{t:'Transfer masuk',w:68,align:'right'},{t:'Transfer keluar',w:68,align:'right'},{t:'Saldo akhir',w:CW-444,align:'right'}];
+  const srows=[];const Z=()=>({o:0,i:0,x:0,ti:0,to:0,c:0});const tk=Z(),ta=Z();
+  const fmtRow=(name,r,opt)=>Object.assign({cells:[name,rp(r.o),rp(r.i),r.x?'-'+rp(r.x):rp(0),rp(r.ti),r.to?'-'+rp(r.to):rp(0),rp(r.c)],colors:[null,null,null,null,null,null,r.c<0?RED:null]},opt||{});
+  R.saldo.forEach(g=>{
+    srows.push({bold:true,fill:HEAD,cells:[g.label]});
+    const sub=Z();
+    g.rows.forEach(a=>{
+      if(a.inactive){srows.push({cells:[a.name+' ('+(g.aset?'Aset':a.kind)+')','Belum aktif'],muted:true});return;}
+      ['o','i','x','ti','to','c'].forEach(k=>{sub[k]+=a[k];ta[k]+=a[k];if(!g.aset)tk[k]+=a[k];});
+      srows.push(fmtRow(a.name+(g.aset?'':' ('+a.kind+')'),a));
+    });
+    srows.push(fmtRow('Subtotal '+g.label,sub,{bold:true,fill:SOFT}));
+  });
+  srows.push(fmtRow('Total kas (tanpa aset)',tk,{bold:true}));
+  srows.push(fmtRow('Total kas dan aset',ta,{bold:true}));
+  table(scol,srows,7.8);
+  ensure(16);y+=12;T(M,y,'Saldo aset mengikuti uang yang dipindahkan ke akun aset. Kenaikan atau penurunan nilai investasi belum dihitung.',7.5,false,MUT);
+  /* kaki halaman */
+  pages.forEach((p,i)=>{ops=p;LN(M,PH-34,M+CW,PH-34,LINE,0.5);T(M,PH-22,'Kas Rumah - Laporan '+R.label,7.5,false,MUT);T(M+CW,PH-22,'Halaman '+(i+1)+' dari '+pages.length,7.5,false,MUT,'right');});
+  /* rakit PDF */
+  const objs=[];const kids=[];let id=5;const pobj=[];
+  pages.forEach(p=>{const content=p.join('\n');pobj.push({pid:id,cid:id+1,content});kids.push(id+' 0 R');id+=2;});
+  objs[1]='<< /Type /Catalog /Pages 2 0 R >>';
+  objs[2]=`<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages.length} >>`;
+  objs[3]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+  objs[4]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+  pobj.forEach(p=>{objs[p.pid]=`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${p.cid} 0 R >>`;
+    objs[p.cid]=`<< /Length ${p.content.length} >>\nstream\n${p.content}\nendstream`;});
+  const infoId=objs.length;objs[infoId]=`<< /Title (${pdfStr('Laporan Kas Rumah '+R.label).replace(/[()\\]/g,'')}) /Producer (Kas Rumah) >>`;
+  let out='%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';const offs=[];
+  for(let i=1;i<objs.length;i++){offs[i]=out.length;out+=`${i} 0 obj\n${objs[i]}\nendobj\n`;}
+  const xref=out.length;
+  out+=`xref\n0 ${objs.length}\n0000000000 65535 f \n`+offs.slice(1).map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('');
+  out+=`trailer\n<< /Size ${objs.length} /Root 1 0 R /Info ${infoId} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const bytes=new Uint8Array(out.length);for(let i=0;i<out.length;i++)bytes[i]=out.charCodeAt(i)&255;
+  return new Blob([bytes],{type:'application/pdf'});
 }
 
 /* ---------- gabung data ---------- */
